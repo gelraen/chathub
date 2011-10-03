@@ -1,10 +1,14 @@
 -module(chathub).
 -behaviour(supervisor).
+-behaviour(application).
 
--export([start/0, init/1]).
+-export([start/2, init/1, stop/1]).
 
-start() ->
+start(_StartType, _Args) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, true).
+
+stop(_) ->
+    ok.
 
 init(true) ->
     Config = load_config(),
