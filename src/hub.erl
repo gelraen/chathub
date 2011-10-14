@@ -24,8 +24,8 @@ init({hub, Name, Config, ChildConfig}) ->
 		    ChildConfig),
     {ok, #state{children = Children, config = Config}}.
 
-spawn_child({Type, Args} = Config, _ParentName) ->
-    Pid = Type:start(Args),
+spawn_child({Type, Args} = Config, ParentName) ->
+    Pid = Type:start(Args, ParentName),
     {Pid, Config}.
 
 handle_call(_, _From, State) ->
