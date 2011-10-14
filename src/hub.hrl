@@ -1,0 +1,2 @@
+-record(state, {children = [],
+	config = []}).
