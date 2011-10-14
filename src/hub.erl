@@ -31,7 +31,15 @@ spawn_child({Type, Args} = Config, _ParentName) ->
 handle_call(_, _From, State) ->
     {reply, ignored, State}.
 
-handle_cast({msg, _From, _Msg}, State) ->
+handle_cast({msg, From, Msg}, State) ->
+    lists:foreach(fun ({Pid, {Type, _}}) ->
+    			if
+	    		From == Pid ->
+				ok;
+			true ->		    
+				Type:send_msg(Pid, {msg, Msg})
+			end
+		end, State#state.children),
     {reply, ok, State};
 handle_cast(_, State) ->
     {reply, ignored, State}.
