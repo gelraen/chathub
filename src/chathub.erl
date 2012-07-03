@@ -31,7 +31,15 @@ load_config() ->
     end.
 
 start_hubs(Config) ->
-    [].
+	lists:map(fun(X) ->
+			case X of
+			{hub, Name, _, _} ->
+				{Name, {hub, start, [X]}, permanent, infinity, supervisor, [hub]};
+			_ ->
+				error_logger:error_msg("Unknown term in config file: ~p~n", [X]),
+				exit(unable_to_parse_config)
+			end
+		end, Config).
 
 get_config_path() ->
     case application:get_env(config) of
