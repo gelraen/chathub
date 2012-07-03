@@ -1,4 +1,4 @@
 {application, chathub,
  [{description, "Multiprotocol chatroom hub"},
-  {modules, [chathub]},
+  {modules, [@MODULES@]},
   {mod, {chathub, []}}]}.
