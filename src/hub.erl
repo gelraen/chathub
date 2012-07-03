@@ -14,8 +14,8 @@
 start({hub, Name, _, _} = Config) ->
     gen_server:start_link({local, Name}, ?MODULE, Config, []).
 
-send_msg(Msg, Name) ->
-    gen_server:cast(Name, {msg, self(), Msg}).
+send_msg(Pid, Msg) ->
+    gen_server:cast(Pid, {msg, self(), Msg}).
 
 init({hub, Name, Config, ChildConfig}) ->
     Children = lists:map(fun(X) ->
@@ -25,8 +25,8 @@ init({hub, Name, Config, ChildConfig}) ->
     {ok, #state{children = Children, config = Config}}.
 
 spawn_child({Type, Args} = Config, ParentName) ->
-    Pid = Type:start(Args, ParentName),
-    {Pid, Config}.
+	{ok, Pid} = Type:start(Args, ParentName),
+	{Pid, Config}.
 
 handle_call(_, _From, State) ->
     {reply, ignored, State}.
@@ -37,12 +37,12 @@ handle_cast({msg, From, Msg}, State) ->
 	    		From == Pid ->
 				ok;
 			true ->		    
-				Type:send_msg(Pid, {msg, Msg})
+				Type:send_msg(Pid, Msg)
 			end
 		end, State#state.children),
-    {reply, ok, State};
+    {noreply, State};
 handle_cast(_, State) ->
-    {reply, ignored, State}.
+    {noreply, State}.
 
 handle_info(_, State) ->
     {reply, ignored, State}.
