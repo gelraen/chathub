@@ -2,7 +2,11 @@
 -behaviour(supervisor).
 -behaviour(application).
 
--export([start/2, init/1, stop/1]).
+-export([start/2, init/1, stop/1, launch/0]).
+
+launch() ->
+	application:load(?MODULE),
+	application:start(?MODULE).
 
 start(_StartType, _Args) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, true).
