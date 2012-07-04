@@ -40,13 +40,10 @@ spawn_child({Type, Args} = Config, ParentName) ->
 	{Pid, Config}.
 
 call_for_all_except_sender(SenderPid, Func, Args, State) ->
-	lists:foreach(fun ({Pid, {Type, _}}) ->
-				if
-				SenderPid == Pid ->
-					ok;
-				true ->
-					apply(Type, Func, [Pid] ++ Args)
-				end
+	lists:foreach(fun ({SenderPid, _}) ->
+				ok;
+			({Pid, {Type, _}}) ->
+				apply(Type, Func, [Pid] ++ Args)
 			end, State#state.children),
 	ok.
 
