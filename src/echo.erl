@@ -2,7 +2,7 @@
 -behaviour(gen_server).
 -behaviour(proto_handler).
 
--export([start/2, send_msg/2]).
+-export([start/2, send_msg/2, user_added/3, user_removed/2, user_renamed/3]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
 -record(state, {parent, name}).
@@ -12,6 +12,15 @@ start(Config, Parent) ->
 
 send_msg(Pid, Msg) ->
 	gen_server:cast(Pid, Msg).
+
+user_added(Pid, Id, Name) ->
+	gen_server:cast(Pid, {add_user, Id, Name}).
+
+user_removed(Pid, Id) ->
+	gen_server:cast(Pid, {remove_user, Id}).
+
+user_renamed(Pid, Id, NewName) ->
+	gen_server:cast(Pid, {rename_user, Id, NewName}).
 
 init({Name, Parent}) ->
 	io:format("~s:Starting echo handler with pid ~p~n", [Name, self()]),
