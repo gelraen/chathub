@@ -45,7 +45,7 @@ spawn_child({Type, Args} = Config, ParentName) ->
 	{Pid, Config}.
 
 call_for_all_except_sender(SenderPid, Func, Args, State) ->
-	lists:foreach(fun ({SenderPid, _}) ->
+	lists:foreach(fun ({Pid, _}) when Pid == SenderPid ->
 				ok;
 			({Pid, {Type, _}}) ->
 				apply(Type, Func, [Pid] ++ Args)
@@ -53,7 +53,7 @@ call_for_all_except_sender(SenderPid, Func, Args, State) ->
 	ok.
 
 gen_user_id(Name, Pid, State) ->
-	Id = {random:uniform(fffffffh), Pid},
+	Id = {random:uniform(16#fffffff), Pid},
 	case lists:member(Id, State#state.users) of
 	true ->
 		gen_user_id(Name, Pid, State);
