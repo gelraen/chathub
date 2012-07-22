@@ -11,6 +11,11 @@
 
 -include("hub.hrl").
 
+-record(state, {name,
+		children = [],
+		config = [],
+		users = []}).
+
 start({hub, Name, _, _} = Config) ->
     gen_server:start_link({local, Name}, ?MODULE, Config, []).
 

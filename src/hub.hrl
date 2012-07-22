@@ -1,8 +1,3 @@
--record(state, {name,
-	children = [],
-	config = [],
-	users = []}).
-
 -record(msg, {from,
 	body}).
 
