@@ -8,7 +8,7 @@
 -record(state, {parent, buffer = [], socket}).
 
 start(Host, Port) ->
-	gen_server:start_link(dcpp_socket, {self(), Host, Port}, []).
+	gen_server:start_link(dc_socket, {self(), Host, Port}, []).
 
 str_replace(String, Old, New) ->
 	str_replace(String, Old, New, []).
