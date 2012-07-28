@@ -1,4 +1,4 @@
--module(dcpp_client).
+-module(dc_client).
 -behaviour(gen_server).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -70,10 +70,10 @@ dcn_unescape(Str) ->
 	dcn_unescape(Str, []).
 
 send(Socket, Line) ->
-	dcpp_socket:send_cmd(Socket, Line).
+	dc_socket:send_cmd(Socket, Line).
 
 init({Parent, Host, Port, Nick}) ->
-	{ok, Socket} = dcpp_socket:start(Host, Port),
+	{ok, Socket} = dc_socket:start(Host, Port),
 	{ok, #state{socket = Socket,
 				parent = Parent,
 				nick = Nick,
@@ -85,13 +85,13 @@ restart_connection(State) ->
 	#state{socket = Socket, host = Host, port = Port} = State,
 	unlink(Socket),
 	exit(Socket, shutdown),
-	NewSocket = dcpp_socket:start(Host, Port),
+	NewSocket = dc_socket:start(Host, Port),
 	State#state{socket = NewSocket}.
 
 new_nick(Nick) ->
 	Nick ++ "_".
 
-handle_info({dcpp, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, parent=Parent}) ->
+handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, parent=Parent}) ->
 	case string:chr(RawMessage, $ ) of
 	0 ->
 		Cmd = RawMessage,
@@ -107,24 +107,24 @@ handle_info({dcpp, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick,
 		{noreply, State};
 	"$ValidateDenide" ->
 		NewState = restart_connection(State#state{nick = new_nick(Nick)}),
-		dcpp:nick_change(Parent, Nick, NewState#state.nick),
+		dc:nick_change(Parent, Nick, NewState#state.nick),
 		{noreply, NewState};
 	"$GetPass" -> % we do not support passwords
 		NewState = restart_connection(State#state{nick = new_nick(Nick)}),
-		dcpp:nick_change(Parent, Nick, NewState#state.nick),
+		dc:nick_change(Parent, Nick, NewState#state.nick),
 		{noreply, NewState};
 	"$HubName" ->
 		{noreply, State};
 	"$Hello" ->
 		case State#state.loggedin of
 		false ->
-			dcpp:nick_change(Parent, Nick, Args),
+			dc:nick_change(Parent, Nick, Args),
 			send(Socket, "$Version 1,0091"),
 			send(Socket, "$GetNickList"),
 			send(Socket, "$MyINFO $ALL " ++ Args ++ " interest$ $56Kbps" ++ [1] ++ "$no.email$0$"),
 			{noreply, State#state{nick = Args, loggedin = true}};
 		true ->
-			dcpp:join(Parent, Args, []),
+			dc:join(Parent, Args, []),
 			{noreply, State}
 		end;
 	_ ->
@@ -136,7 +136,7 @@ handle_info({dcpp, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick,
 			false ->
 				error_logger:error_msg("Hub sent unknown command before completing registration: ~p~n", [RawMessage]),
 				NewState = restart_connection(State#state{nick = new_nick(Nick)}),
-				dcpp:nick_change(Parent, Nick, NewState#state.nick),
+				dc:nick_change(Parent, Nick, NewState#state.nick),
 				{noreply, NewState};
 			true ->
 				{noreply, State}

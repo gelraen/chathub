@@ -1,4 +1,4 @@
--module(dcpp_socket).
+-module(dc_socket).
 -behaviour(gen_server).
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
@@ -49,7 +49,7 @@ handle_info({tcp, Socket, RawData}, State = #state{socket = Socket, buffer = Buf
 			Rest = lists:last(Tokens)
 		end,
 		lists:foreach(fun(Cmd) ->
-			Pid ! {dcpp, self(), str_replace(Cmd, "&#124;", "|")}
+			Pid ! {dc, self(), str_replace(Cmd, "&#124;", "|")}
 			end, Commands),
 		State#state{buffer = Rest}
 	end,
