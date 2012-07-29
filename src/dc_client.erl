@@ -91,6 +91,14 @@ restart_connection(State) ->
 new_nick(Nick) ->
 	Nick ++ "_".
 
+send_join(BinNick, #state{parent = Parent, nick = OurNick}) ->
+	case binary_to_list(BinNick) of
+	OurNick ->
+		ok;
+	Nick ->
+		dc:join(Parent, Nick, [])
+	end.
+
 handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, parent=Parent}) ->
 	case binary:split(RawMessage, <<" ">>) of
 	[RawMessage] ->
@@ -119,13 +127,18 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 	<<"$Hello">> ->
 		case State#state.loggedin of
 		false ->
-			dc:nick_change(Parent, Nick, binary_to_list(Args)),
+			case NewNick = binary_to_list(Args) of
+			Nick ->
+				ok;
+			_ ->
+				dc:nick_change(Parent, Nick, NewNick)
+			end,
 			send(Socket, <<"$Version 1,0091">>),
 			send(Socket, <<"$GetNickList">>),
 			send(Socket, "$MyINFO $ALL " ++ [Args] ++ " interest$ $56Kbps" ++ [1] ++ "$no.email$0$"),
-			{noreply, State#state{nick = binary_to_list(Args), loggedin = true}};
+			{noreply, State#state{nick = NewNick, loggedin = true}};
 		true ->
-			dc:join(Parent, binary_to_list(Args), []),
+			send_join(Args, State),
 			{noreply, State}
 		end;
 	<<>> ->
