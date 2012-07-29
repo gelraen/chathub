@@ -141,6 +141,14 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 			send_join(Args, State),
 			{noreply, State}
 		end;
+	<<"$NickList">> ->
+		lists:foreach(fun(X) ->
+				send_join(X, State)
+			end, binary:split(Args, <<"$$">>, [global, trim])),
+		{noreply, State};
+	<<"$Quit">> ->
+		dc:part(Parent, binary_to_list(Args), []),
+		{noreply, State};
 	<<>> ->
 		{noreply, State};
 	_ ->
