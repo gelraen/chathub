@@ -3,7 +3,7 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--compile(export_all).
+-export([send_msg/2, send_privmsg/3]).
 
 -record(state, {socket,
 				nick,
@@ -11,6 +11,12 @@
 				host,
 				port,
 				loggedin}).
+
+send_msg(Pid, Text) ->
+	gen_server:cast(Pid, {send_msg, Text}).
+
+send_privmsg(Pid, To, Text) ->
+	gen_server:cast(Pid, {send_privmsg, To, Text}).
 
 roll_xor(List) ->
 	roll_xor(lists:reverse(List), []).
@@ -180,4 +186,13 @@ terminate(_, _) ->
 
 code_change(_,State,_) -> {ok, State}.
 handle_call(_,_,State) -> {noreply, State}.
+
+handle_cast({send_msg, Text}, State = #state{nick = Nick, socket = Socket}) ->
+	send(Socket, "<" ++ Nick ++ "> " ++ Text),
+	{noreply, State};
+
+handle_cast({send_privmsg, To, Text}, State = #state{nick = Nick, socket = Socket}) ->
+	send(Socket, "$To: " ++ To ++ " From: " ++ Nick ++ " $<" ++ Nick ++ "> " ++ Text),
+	{noreply, State};
+
 handle_cast(_,State) -> {noreply, State}.
