@@ -3,7 +3,7 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--compile(export_all).
+-export([send_msg/2, send_privmsg/3]).
 
 -record(state, {socket,
 				nick,
@@ -12,6 +12,12 @@
 				prefix_chars = "@+"}).
 
 -record(cmd, {name, prefix, args}).
+
+send_msg(Pid, Text) ->
+	gen_server:cast(Pid, {send_msg, Text}).
+
+send_privmsg(Pid, To, Text) ->
+	gen_server:cast(Pid, {send_privmsg, To, Text}).
 
 first_token(Tok, []) ->
 	{Tok, []};
@@ -121,7 +127,12 @@ handle_info({tcp, Socket, RawMessage}, State = #state{socket=Socket}) ->
 					false ->
 						Nick
 					end,
-					irc:join(State#state.parent, StrippedNick, [])
+					case StrippedNick of
+					OurNick ->
+						ok;
+					_ ->
+						irc:join(State#state.parent, StrippedNick, [])
+					end
 				end,
 				string:tokens(lists:nth(4, Command#cmd.args), " "));
 		_ ->
@@ -180,4 +191,13 @@ terminate(_, #state{socket=Socket}) ->
 
 code_change(_,State,_) -> {ok, State}.
 handle_call(_,_,State) -> {noreply, State}.
+
+handle_cast({send_msg, Text}, State = #state{socket = Socket, channel = Channel}) ->
+	send(Socket, "PRIVMSG " ++ Channel ++ " :" ++ Text),
+	{noreply, State};
+
+handle_cast({send_privmsg, To, Text}, State = #state{socket = Socket}) ->
+	send(Socket, "PRIVMSG " ++ To ++ " :" ++ Text),
+	{noreply, State};
+
 handle_cast(_,State) -> {noreply, State}.

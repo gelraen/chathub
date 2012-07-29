@@ -9,7 +9,7 @@
 
 -include("hub.hrl").
 
--record(state, {parent, host, port, channel, users = []}).
+-record(state, {parent, host, port, channel, localusers = [], remoteusers = [], client}).
 
 % irc-specific callbacks
 join(Pid, Nick, Data) ->
@@ -45,52 +45,75 @@ user_renamed(Pid, Id, NewName) ->
 
 % gen_server callbacks
 init({{Host, Port, Channel}, Parent}) ->
-	gen_server:start_link(irc_client, {self(), Host, Port, Channel, "chathub", "Test Test", "chathub"}, []),
-	{ok, #state{parent=Parent, host=Host, port=Port, channel=Channel}}.
+	{ok, Client} = gen_server:start_link(irc_client, {self(), Host, Port, Channel, "chathub", "Test Test", "chathub"}, []),
+	{ok, #state{parent=Parent, host=Host, port=Port, channel=Channel, client = Client}}.
 
-handle_call(Request, Parent, #state{parent=Parent} = State) ->
+handle_call(_Request, Parent, #state{parent=Parent} = State) ->
 	{noreply, State};
 
-handle_call(Request, From, State) ->
+handle_call(_Request, _From, State) ->
 	{noreply, State}.
 
-handle_cast({join, Nick, _Data}, State) ->
-	{ok, Id} = hub:add_user(State#state.parent, Nick),
-	NewUsers = State#state.users ++ [{Id, Nick}],
-	{noreply, State#state{users = NewUsers}};
+handle_cast({join, Nick, _Data}, State = #state{parent = Parent, localusers = Users}) ->
+	{ok, Id} = hub:add_user(Parent, Nick),
+	NewUsers = Users ++ [{Id, Nick}],
+	{noreply, State#state{localusers = NewUsers}};
 
-handle_cast({part, Nick, _Data}, State) ->
-	NewUsers = case lists:keyfind(Nick, 2, State#state.users) of
+handle_cast({part, Nick, _Data}, State = #state{parent = Parent, localusers = Users}) ->
+	NewUsers = case lists:keyfind(Nick, 2, Users) of
 	{Id, Nick} = El ->
-		hub:remove_user(State#state.parent, Id),
-		lists:delete(El, State#state.users);
+		hub:remove_user(Parent, Id),
+		lists:delete(El, Users);
 	false ->
-		State#state.users
+		Users
 	end,
-	{noreply, State#state{users = NewUsers}};
+	{noreply, State#state{localusers = NewUsers}};
 
-handle_cast({nick_change, OldNick, NewNick}, State) ->
-	NewUsers = case lists:keyfind(OldNick, 2, State#state.users) of
-	{Id, OldNick} = El ->
-		hub:rename_user(State#state.parent, Id, NewNick),
-		lists:keyreplace(Id, 1, State#state.users, {Id, NewNick});
+handle_cast({nick_change, OldNick, NewNick}, State = #state{localusers = Users, parent = Parent}) ->
+	NewUsers = case lists:keyfind(OldNick, 2, Users) of
+	{Id, OldNick} ->
+		hub:rename_user(Parent, Id, NewNick),
+		lists:keyreplace(Id, 1, Users, {Id, NewNick});
 	false ->
-		State#state.users
+		Users
 	end,
-	{noreply, State#state{users = NewUsers}};
+	{noreply, State#state{localusers = NewUsers}};
 
-handle_cast({message, Nick, Text}, State) ->
-	{Id, Nick} = lists:keyfind(Nick, 2, State#state.users),
+handle_cast({message, Nick, Text}, State = #state{localusers = Users}) ->
+	{Id, Nick} = lists:keyfind(Nick, 2, Users),
 	hub:send_msg(State#state.parent, #msg{from = Id, body = Text}),
 	{noreply, State};
 
-handle_cast(Request, State) ->
+handle_cast(#msg{from = FromId, body = Text}, State = #state{client = Client, remoteusers = RemoteUsers}) ->
+	{FromId, FromNick} = lists:keyfind(FromId, 1, RemoteUsers),
+	irc_client:send_msg(Client, "<" ++ FromNick ++ "> " ++ Text),
+	{noreply, State};
+	
+handle_cast(#privmsg{from = FromId, to = ToId, body = Text}, State = #state{client = Client, remoteusers = RemoteUsers, localusers = Users}) ->
+	{FromId, FromNick} = lists:keyfind(FromId, 1, RemoteUsers),
+	{ToId, ToNick} = lists:keyfind(ToId, 1, Users),
+	irc_client:send_privmsg(Client, ToNick, "<" ++ FromNick ++ "> " ++ Text),
+	{noreply, State};
+
+handle_cast({add_user, Id, Nick}, State = #state{remoteusers = RemoteUsers}) ->
+	NewUsers = RemoteUsers ++ [{Id, Nick}],
+	{noreply, State#state{remoteusers = NewUsers}};
+
+handle_cast({remove_user, Id}, State = #state{remoteusers = RemoteUsers}) ->
+	NewUsers = lists:keydelete(Id, 1, RemoteUsers),
+	{noreply, State#state{remoteusers = NewUsers}};
+
+handle_cast({rename_user, Id, Nick}, State = #state{remoteusers = RemoteUsers}) ->
+	NewUsers = lists:keyreplace(Id, 1, RemoteUsers, {Id, Nick}),
+	{noreply, State#state{remoteusers = NewUsers}};
+
+handle_cast(_Request, State) ->
 	{noreply, State}.
 
-handle_info(Info, State) ->
+handle_info(_Info, State) ->
 	{noreply, State}.
 
-terminate(Reason, State) ->
+terminate(_Reason, _State) ->
 	ok.
 
 code_change(_, State, _) ->
