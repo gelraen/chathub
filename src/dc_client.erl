@@ -92,43 +92,46 @@ new_nick(Nick) ->
 	Nick ++ "_".
 
 handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, parent=Parent}) ->
-	case string:chr(RawMessage, $ ) of
-	0 ->
+	case binary:split(RawMessage, <<" ">>) of
+	[RawMessage] ->
 		Cmd = RawMessage,
-		Args = [];
-	Index ->
-		Cmd = string:substr(RawMessage, 1, Index - 1),
-		Args = string:substr(RawMessage, Index + 1)
+		Args = <<>>;
+	[L1, L2] ->
+		Cmd = L1,
+		Args = L2
 	end,
+	io:format("Cmd: ~p\tArgs: ~p~n", [Cmd, Args]),
 	case Cmd of
-	"$Lock" ->
-		send(Socket, "$Key " ++ decode_lock(hd(string:tokens(Args, " ")))),
+	<<"$Lock">> ->
+		send(Socket, "$Key " ++ decode_lock(hd(string:tokens(binary_to_list(Args), " ")))),
 		send(Socket, "$ValidateNick " ++ Nick),
 		{noreply, State};
-	"$ValidateDenide" ->
+	<<"$ValidateDenide">> ->
 		NewState = restart_connection(State#state{nick = new_nick(Nick)}),
 		dc:nick_change(Parent, Nick, NewState#state.nick),
 		{noreply, NewState};
-	"$GetPass" -> % we do not support passwords
+	<<"$GetPass">> -> % we do not support passwords
 		NewState = restart_connection(State#state{nick = new_nick(Nick)}),
 		dc:nick_change(Parent, Nick, NewState#state.nick),
 		{noreply, NewState};
-	"$HubName" ->
+	<<"$HubName">> ->
 		{noreply, State};
-	"$Hello" ->
+	<<"$Hello">> ->
 		case State#state.loggedin of
 		false ->
-			dc:nick_change(Parent, Nick, Args),
-			send(Socket, "$Version 1,0091"),
-			send(Socket, "$GetNickList"),
-			send(Socket, "$MyINFO $ALL " ++ Args ++ " interest$ $56Kbps" ++ [1] ++ "$no.email$0$"),
-			{noreply, State#state{nick = Args, loggedin = true}};
+			dc:nick_change(Parent, Nick, binary_to_list(Args)),
+			send(Socket, <<"$Version 1,0091">>),
+			send(Socket, <<"$GetNickList">>),
+			send(Socket, "$MyINFO $ALL " ++ [Args] ++ " interest$ $56Kbps" ++ [1] ++ "$no.email$0$"),
+			{noreply, State#state{nick = binary_to_list(Args), loggedin = true}};
 		true ->
-			dc:join(Parent, Args, []),
+			dc:join(Parent, binary_to_list(Args), []),
 			{noreply, State}
 		end;
+	<<>> ->
+		{noreply, State};
 	_ ->
-		case ((hd(Cmd) == $<) and (lists:last(Cmd) == $>)) of
+		case ((binary:at(Cmd, 0) == $<) and (binary:at(Cmd, size(Cmd) - 1) == $>)) of
 		true ->
 			{noreply, State};
 		false ->
@@ -144,8 +147,8 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 		end
 	end.
 
-terminate(_, #state{socket=Socket}) ->
-	gen_tcp:close(Socket).
+terminate(_, _) ->
+	ok.
 
 code_change(_,State,_) -> {ok, State}.
 handle_call(_,_,State) -> {noreply, State}.
