@@ -149,11 +149,19 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 	<<"$Quit">> ->
 		dc:part(Parent, binary_to_list(Args), []),
 		{noreply, State};
+	<<"$To:">> ->
+		[Header, Message] = binary:split(Args, <<"$">>),
+		Sender = binary_to_list(lists:nth(3, binary:split(Header, <<" ">>, [global]))),
+		Text = binary_to_list(lists:nth(2, binary:split(Message, <<" ">>))),
+		dc:private_message(Parent, Sender, Nick, Text),
+		{noreply, State};
 	<<>> ->
 		{noreply, State};
 	_ ->
 		case ((binary:first(Cmd) == $<) and (binary:last(Cmd) == $>)) of
 		true ->
+			Sender = binary_to_list(binary:part(Cmd, 1, size(Cmd) - 2)),
+			dc:message(Parent, Sender, binary_to_list(Args)),
 			{noreply, State};
 		false ->
 			case State#state.loggedin of
