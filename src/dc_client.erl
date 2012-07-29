@@ -108,7 +108,6 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 		Cmd = L1,
 		Args = L2
 	end,
-	io:format("Cmd: ~p\tArgs: ~p~n", [Cmd, Args]),
 	case Cmd of
 	<<"$Lock">> ->
 		send(Socket, "$Key " ++ decode_lock(hd(string:tokens(binary_to_list(Args), " ")))),
