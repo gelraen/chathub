@@ -152,7 +152,7 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 	<<>> ->
 		{noreply, State};
 	_ ->
-		case ((binary:at(Cmd, 0) == $<) and (binary:at(Cmd, size(Cmd) - 1) == $>)) of
+		case ((binary:first(Cmd) == $<) and (binary:last(Cmd) == $>)) of
 		true ->
 			{noreply, State};
 		false ->
