@@ -3,7 +3,7 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--export([send_msg/2, send_privmsg/3]).
+-export([send_msg/2, send_privmsg/3, start/5, start_master/5]).
 
 -record(state, {socket,
 				nick,
@@ -12,13 +12,20 @@
 				parent,
 				host,
 				port,
-				loggedin}).
+				loggedin = false,
+				master = false}).
 
 send_msg(Pid, Text) ->
 	gen_server:cast(Pid, {send_msg, Text}).
 
 send_privmsg(Pid, To, Text) ->
 	gen_server:cast(Pid, {send_privmsg, To, Text}).
+
+start(Host, Port, Nick, Share, Descr) ->
+	gen_server:start_link(?MODULE, {self(), Host, Port, Nick, Share, Descr, false}, []).
+
+start_master(Host, Port, Nick, Share, Descr) ->
+	gen_server:start_link(?MODULE, {self(), Host, Port, Nick, Share, Descr, true}, []).
 
 roll_xor(List) ->
 	roll_xor(lists:reverse(List), []).
@@ -80,7 +87,7 @@ dcn_unescape(Str) ->
 send(Socket, Line) ->
 	dc_socket:send_cmd(Socket, Line).
 
-init({Parent, Host, Port, Nick, Share, Descr}) ->
+init({Parent, Host, Port, Nick, Share, Descr, Master}) ->
 	{ok, Socket} = dc_socket:start(Host, Port),
 	{ok, #state{socket = Socket,
 				parent = Parent,
@@ -89,25 +96,41 @@ init({Parent, Host, Port, Nick, Share, Descr}) ->
 				description = Descr,
 				host = Host,
 				port = Port,
-				loggedin = false}}.
+				loggedin = false,
+				master = Master}}.
 
 restart_connection(State) ->
 	#state{socket = Socket, host = Host, port = Port} = State,
 	unlink(Socket),
 	exit(Socket, shutdown),
-	NewSocket = dc_socket:start(Host, Port),
+	{ok, NewSocket} = dc_socket:start(Host, Port),
 	State#state{socket = NewSocket}.
 
 new_nick(Nick) ->
 	Nick ++ "_".
 
-send_join(BinNick, #state{parent = Parent, nick = OurNick}) ->
+send_join(_, #state{master = false}) ->
+	ok;
+
+send_join(BinNick, #state{parent = Parent, nick = OurNick, master = true}) ->
 	case binary_to_list(BinNick) of
 	OurNick ->
 		ok;
 	Nick ->
 		dc:join(Parent, Nick, [])
 	end.
+
+send_part(_, #state{master = false}) ->
+	ok;
+
+send_part(BinNick, #state{parent = Parent, master = true}) ->
+	dc:part(Parent, binary_to_list(BinNick), []).
+
+send_message(_, _, #state{master = false}) ->
+	ok;
+
+send_message(BinNick, BinData, #state{parent = Parent, master = true}) ->
+	dc:message(Parent, binary_to_list(BinNick), binary_to_list(BinData)).
 
 handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, parent=Parent}) ->
 	case binary:split(RawMessage, <<" ">>) of
@@ -157,7 +180,7 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 			end, binary:split(Args, <<"$$">>, [global, trim])),
 		{noreply, State};
 	<<"$Quit">> ->
-		dc:part(Parent, binary_to_list(Args), []),
+		send_part(Args, State),
 		{noreply, State};
 	<<"$To:">> ->
 		[Header, Message] = binary:split(Args, <<"$">>),
@@ -170,8 +193,7 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 	_ ->
 		case ((binary:first(Cmd) == $<) and (binary:last(Cmd) == $>)) of
 		true ->
-			Sender = binary_to_list(binary:part(Cmd, 1, size(Cmd) - 2)),
-			dc:message(Parent, Sender, binary_to_list(Args)),
+			send_message(binary:part(Cmd, 1, size(Cmd) - 2), Args, State),
 			{noreply, State};
 		false ->
 			case State#state.loggedin of

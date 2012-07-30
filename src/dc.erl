@@ -62,29 +62,45 @@ init({{Host, Port, Opts}, Parent}) ->
 		(_, State) ->
 			State
 		end, #state{}, Opts),
-	{ok, Socket} = gen_server:start_link(dc_client, {self(), Host, Port, State#state.nick, State#state.sharesize, State#state.description}, []),
+	{ok, Socket} = dc_client:start_master(Host, Port, State#state.nick, State#state.sharesize, State#state.description),
 	{ok, State#state{parent=Parent, host=Host, port=Port, socket = Socket}}.
 
 handle_call(_, _, State) ->
 	{noreply, State}.
 
-handle_cast({join, Nick, _Data}, State) ->
-	{ok, Id} = hub:add_user(State#state.parent, Nick),
-	NewUsers = State#state.localusers ++ [{Id, Nick}],
-	{noreply, State#state{localusers = NewUsers}};
+handle_cast({join, Nick, _Data}, State = #state{remoteusers = RemoteUsers}) ->
+	case lists:keyfind(Nick, 2, RemoteUsers) of
+	{_Id, Nick, _Pid} ->
+		{noreply, State};
+	_ ->
+		{ok, Id} = hub:add_user(State#state.parent, Nick),
+		NewUsers = State#state.localusers ++ [{Id, Nick}],
+		{noreply, State#state{localusers = NewUsers}}
+	end;
 
-handle_cast({part, Nick, _Data}, State = #state{parent = Parent, localusers = Users}) ->
-	NewUsers = case lists:keyfind(Nick, 2, Users) of
-	{Id, Nick} = El ->
-		hub:remove_user(Parent, Id),
-		lists:delete(El, Users);
-	false ->
+handle_cast({part, Nick, _Data}, State = #state{parent = Parent, localusers = Users, remoteusers = RemoteUsers}) ->
+	case lists:keyfind(Nick, 2, RemoteUsers) of
+	{_Id, Nick, _Pid} ->
+		{noreply, State};
+	_ ->
+		NewUsers = case lists:keyfind(Nick, 2, Users) of
+		{Id, Nick} = El ->
+			hub:remove_user(Parent, Id),
+			lists:delete(El, Users);
+		false ->
+			Users
+		end,
+		{noreply, State#state{localusers = NewUsers}}
+	end;
+
+handle_cast({nick_change, OldNick, NewNick}, State = #state{remoteusers = Users}) ->
+	NewUsers = case lists:keyfind(OldNick, 2, Users) of
+	{Id, OldNick, Pid} ->
+		lists:keyreplace(OldNick, 2, Users, {Id, NewNick, Pid});
+	_ ->
 		Users
 	end,
-	{noreply, State#state{localusers = NewUsers}};
-
-handle_cast({nick_change, _OldNick, _NewNick}, State) ->
-	{noreply, State};
+	{noreply, State#state{remoteusers = NewUsers}};
 
 handle_cast({message, Nick, Text}, State = #state{localusers = Users, parent = Parent}) ->
 	case lists:keyfind(Nick, 2, Users) of
@@ -109,27 +125,35 @@ handle_cast({private_message, FromNick, ToNick, Text}, State = #state{localusers
 	end,
 	{noreply, State};
 
-handle_cast(#msg{from = FromId, body = Text}, State = #state{socket = Socket, remoteusers = RemoteUsers}) ->
-	{FromId, FromNick} = lists:keyfind(FromId, 1, RemoteUsers),
-	dc_client:send_msg(Socket, "<" ++ FromNick ++ "> " ++ Text),
+handle_cast(#msg{from = FromId, body = Text}, State = #state{remoteusers = RemoteUsers}) ->
+	{FromId, _FromNick, Pid} =  lists:keyfind(FromId, 1, RemoteUsers),
+	dc_client:send_msg(Pid, Text),
 	{noreply, State};
 
-handle_cast(#privmsg{from = FromId, to = ToId, body = Text}, State = #state{socket = Socket, remoteusers = RemoteUsers, localusers = Users}) ->
-	{FromId, FromNick} = lists:keyfind(FromId, 1, RemoteUsers),
+handle_cast(#privmsg{from = FromId, to = ToId, body = Text}, State = #state{remoteusers = RemoteUsers, localusers = Users}) ->
+	{FromId, _FromNick, Pid} = lists:keyfind(FromId, 1, RemoteUsers),
 	{ToId, ToNick} = lists:keyfind(ToId, 1, Users),
-	dc_client:send_privmsg(Socket, ToNick, "<" ++ FromNick ++ "> " ++ Text),
+	dc_client:send_privmsg(Pid, ToNick, Text),
 	{noreply, State};
 
 handle_cast({add_user, Id, Nick}, State = #state{remoteusers = RemoteUsers}) ->
-	NewUsers = RemoteUsers ++ [{Id, Nick}],
+	{ok, Pid} = dc_client:start(State#state.host, State#state.port,  Nick, State#state.sharesize, State#state.description),
+	NewUsers = RemoteUsers ++ [{Id, Nick, Pid}],
 	{noreply, State#state{remoteusers = NewUsers}};
 
 handle_cast({remove_user, Id}, State = #state{remoteusers = RemoteUsers}) ->
+	{Id, _Nick, Pid} = lists:keyfind(Id, 1, RemoteUsers),
+	unlink(Pid),
+	exit(Pid, shutdown),
 	NewUsers = lists:keydelete(Id, 1, RemoteUsers),
 	{noreply, State#state{remoteusers = NewUsers}};
 
 handle_cast({rename_user, Id, Nick}, State = #state{remoteusers = RemoteUsers}) ->
-	NewUsers = lists:keyreplace(Id, 1, RemoteUsers, {Id, Nick}),
+	{Id, _Nick, OldPid} = lists:keyfind(Id, 1, RemoteUsers),
+	unlink(OldPid),
+	exit(OldPid, shutdown),
+	{ok, NewPid} = dc_client:start(State#state.host, State#state.port,  Nick, State#state.sharesize, State#state.description),
+	NewUsers = lists:keyreplace(Id, 1, RemoteUsers, {Id, Nick, NewPid}),
 	{noreply, State#state{remoteusers = NewUsers}};
 
 handle_cast(_Request, State) ->
