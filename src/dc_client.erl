@@ -7,6 +7,8 @@
 
 -record(state, {socket,
 				nick,
+				sharesize,
+				description,
 				parent,
 				host,
 				port,
@@ -78,11 +80,13 @@ dcn_unescape(Str) ->
 send(Socket, Line) ->
 	dc_socket:send_cmd(Socket, Line).
 
-init({Parent, Host, Port, Nick}) ->
+init({Parent, Host, Port, Nick, Share, Descr}) ->
 	{ok, Socket} = dc_socket:start(Host, Port),
 	{ok, #state{socket = Socket,
 				parent = Parent,
 				nick = Nick,
+				sharesize = Share,
+				description = Descr,
 				host = Host,
 				port = Port,
 				loggedin = false}}.
@@ -140,7 +144,8 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 			end,
 			send(Socket, <<"$Version 1,0091">>),
 			send(Socket, <<"$GetNickList">>),
-			send(Socket, "$MyINFO $ALL " ++ [Args] ++ " interest$ $56Kbps" ++ [1] ++ "$no.email$0$"),
+			send(Socket, "$MyINFO $ALL " ++ [Args] ++ " " ++ State#state.description ++ "$ $56Kbps" ++ [1] ++
+					"$no.email$" ++ integer_to_list(State#state.sharesize) ++ "$"),
 			{noreply, State#state{nick = NewNick, loggedin = true}};
 		true ->
 			send_join(Args, State),

@@ -9,7 +9,15 @@
 
 -include("hub.hrl").
 
--record(state, {parent, host, port, localusers = [], remoteusers = [], socket}).
+-record(state, {parent,
+				host,
+				port,
+				localusers = [],
+				remoteusers = [],
+				socket,
+				nick = "chathub",
+				sharesize = 0,
+				description = "Multiprotocol chatroom hub"}).
 
 % protocol-specific callbacks
 join(Pid, Nick, Data) ->
@@ -44,9 +52,18 @@ user_renamed(Pid, Id, NewName) ->
 	gen_server:cast(Pid, {rename_user, Id, NewName}).
 
 % gen_server callbacks
-init({{Host, Port}, Parent}) ->
-	{ok, Socket} = gen_server:start_link(dc_client, {self(), Host, Port, "chathub"}, []),
-	{ok, #state{parent=Parent, host=Host, port=Port, socket = Socket}}.
+init({{Host, Port, Opts}, Parent}) ->
+	State = lists:foldl(fun ({nick, NewNick}, State = #state{}) ->
+			State#state{nick = NewNick};
+		({sharesize, Share}, State = #state{}) ->
+			State#state{sharesize = Share};
+		({description, Descr}, State = #state{}) ->
+			State#state{description = Descr};
+		(_, State) ->
+			State
+		end, #state{}, Opts),
+	{ok, Socket} = gen_server:start_link(dc_client, {self(), Host, Port, State#state.nick, State#state.sharesize, State#state.description}, []),
+	{ok, State#state{parent=Parent, host=Host, port=Port, socket = Socket}}.
 
 handle_call(_, _, State) ->
 	{noreply, State}.

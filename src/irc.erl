@@ -9,7 +9,16 @@
 
 -include("hub.hrl").
 
--record(state, {parent, host, port, channel, localusers = [], remoteusers = [], client}).
+-record(state, {parent,
+				host,
+				port,
+				channel,
+				nick = "chathub",
+				realname = "Multiprotocol chatroom hub",
+				username = "chathub",
+				localusers = [],
+				remoteusers = [],
+				client}).
 
 % irc-specific callbacks
 join(Pid, Nick, Data) ->
@@ -44,9 +53,18 @@ user_renamed(Pid, Id, NewName) ->
 	gen_server:cast(Pid, {rename_user, Id, NewName}).
 
 % gen_server callbacks
-init({{Host, Port, Channel}, Parent}) ->
-	{ok, Client} = gen_server:start_link(irc_client, {self(), Host, Port, Channel, "chathub", "Test Test", "chathub"}, []),
-	{ok, #state{parent=Parent, host=Host, port=Port, channel=Channel, client = Client}}.
+init({{Host, Port, Channel, Opts}, Parent}) ->
+	State = lists:foldl(fun ({nick, NewNick}, State = #state{}) ->
+			State#state{nick = NewNick};
+		({realname, RealName}, State = #state{}) ->
+			State#state{realname = RealName};
+		({username, UserName}, State = #state{}) ->
+			State#state{username = UserName};
+		(_, State) ->
+			State
+		end, #state{}, Opts),
+	{ok, Client} = gen_server:start_link(irc_client, {self(), Host, Port, Channel, State#state.nick, State#state.realname, State#state.username}, []),
+	{ok, State#state{parent=Parent, host=Host, port=Port, channel=Channel, client = Client}}.
 
 handle_call(_Request, Parent, #state{parent=Parent} = State) ->
 	{noreply, State};
