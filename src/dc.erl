@@ -115,7 +115,7 @@ handle_cast({private_message, FromNick, ToNick, Text}, State = #state{localusers
 	case lists:keyfind(FromNick, 2, Users) of
 	{FromId, FromNick} ->
 		case lists:keyfind(ToNick, 2, RemoteUsers) of
-		{ToId, ToNick} ->
+		{ToId, ToNick, _} ->
 			hub:send_msg(Parent, #privmsg{from = FromId, to = ToId, body = Text});
 		_ ->
 			ok
