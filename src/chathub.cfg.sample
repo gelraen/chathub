@@ -1,0 +1,14 @@
+{hub, hub1, [hub_config_here],
+	[{irc, {"localhost", 6667, "#chat", [
+			{nick, "chathub"},
+			{realname, "Multiprotocol chatroom hub"},
+			{username, "chathub"}
+		]
+		}},
+	{dc, {"localhost", 411, [
+			{nick, "chathub"},
+			{sharesize, 0},
+			{description, "Multiprotocol chatroom hub"}
+		]}}
+	]
+}.
