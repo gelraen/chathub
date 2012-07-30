@@ -63,7 +63,7 @@ init({{Host, Port, Channel, Opts}, Parent}) ->
 		(_, State) ->
 			State
 		end, #state{}, Opts),
-	{ok, Client} = gen_server:start_link(irc_client, {self(), Host, Port, Channel, State#state.nick, State#state.realname, State#state.username}, []),
+	{ok, Client} = irc_client:start_master(Host, Port, Channel, State#state.nick, State#state.realname, State#state.username),
 	{ok, State#state{parent=Parent, host=Host, port=Port, channel=Channel, client = Client}}.
 
 handle_call(_Request, Parent, #state{parent=Parent} = State) ->
@@ -72,20 +72,30 @@ handle_call(_Request, Parent, #state{parent=Parent} = State) ->
 handle_call(_Request, _From, State) ->
 	{noreply, State}.
 
-handle_cast({join, Nick, _Data}, State = #state{parent = Parent, localusers = Users}) ->
-	{ok, Id} = hub:add_user(Parent, Nick),
-	NewUsers = Users ++ [{Id, Nick}],
-	{noreply, State#state{localusers = NewUsers}};
+handle_cast({join, Nick, _Data}, State = #state{parent = Parent, localusers = Users, remoteusers = RemoteUsers}) ->
+	case lists:keyfind(Nick, 2, RemoteUsers) of
+	{_Id, Nick, _Pid} ->
+		{noreply, State};
+	_ ->
+		{ok, Id} = hub:add_user(Parent, Nick),
+		NewUsers = Users ++ [{Id, Nick}],
+		{noreply, State#state{localusers = NewUsers}}
+	end;
 
-handle_cast({part, Nick, _Data}, State = #state{parent = Parent, localusers = Users}) ->
-	NewUsers = case lists:keyfind(Nick, 2, Users) of
-	{Id, Nick} = El ->
-		hub:remove_user(Parent, Id),
-		lists:delete(El, Users);
-	false ->
-		Users
-	end,
-	{noreply, State#state{localusers = NewUsers}};
+handle_cast({part, Nick, _Data}, State = #state{parent = Parent, localusers = Users, remoteusers = RemoteUsers}) ->
+	case lists:keyfind(Nick, 2, RemoteUsers) of
+	{_Id, Nick, _Pid} ->
+		{noreply, State};
+	_ ->
+		NewUsers = case lists:keyfind(Nick, 2, Users) of
+		{Id, Nick} = El ->
+			hub:remove_user(Parent, Id),
+			lists:delete(El, Users);
+		false ->
+			Users
+		end,
+		{noreply, State#state{localusers = NewUsers}}
+	end;
 
 handle_cast({nick_change, OldNick, NewNick}, State = #state{localusers = Users, parent = Parent}) ->
 	NewUsers = case lists:keyfind(OldNick, 2, Users) of
@@ -98,30 +108,58 @@ handle_cast({nick_change, OldNick, NewNick}, State = #state{localusers = Users, 
 	{noreply, State#state{localusers = NewUsers}};
 
 handle_cast({message, Nick, Text}, State = #state{localusers = Users}) ->
-	{Id, Nick} = lists:keyfind(Nick, 2, Users),
-	hub:send_msg(State#state.parent, #msg{from = Id, body = Text}),
+	case lists:keyfind(Nick, 2, Users) of
+	{Id, Nick} ->
+		hub:send_msg(State#state.parent, #msg{from = Id, body = Text});
+	_ ->
+		ok
+	end,
 	{noreply, State};
 
-handle_cast(#msg{from = FromId, body = Text}, State = #state{client = Client, remoteusers = RemoteUsers}) ->
-	{FromId, FromNick} = lists:keyfind(FromId, 1, RemoteUsers),
-	irc_client:send_msg(Client, "<" ++ FromNick ++ "> " ++ Text),
+handle_cast({private_message, FromNick, ToNick, Text}, State = #state{localusers = Users, remoteusers = RemoteUsers, parent = Parent}) ->
+	case lists:keyfind(FromNick, 2, Users) of
+	{FromId, FromNick} ->
+		case lists:keyfind(ToNick, 2, RemoteUsers) of
+		{ToId, ToNick, _} ->
+			hub:send_msg(Parent, #privmsg{from = FromId, to = ToId, body = Text});
+		_ ->
+			ok
+		end;
+	_ ->
+		ok
+	end,
+	{noreply, State};
+
+handle_cast(#msg{from = FromId, body = Text}, State = #state{remoteusers = RemoteUsers}) ->
+	case lists:keyfind(FromId, 1, RemoteUsers) of
+	{FromId, _FromNick, Pid} ->
+		irc_client:send_msg(Pid, Text);
+	_ ->
+		ok
+	end,
 	{noreply, State};
 	
-handle_cast(#privmsg{from = FromId, to = ToId, body = Text}, State = #state{client = Client, remoteusers = RemoteUsers, localusers = Users}) ->
-	{FromId, FromNick} = lists:keyfind(FromId, 1, RemoteUsers),
+handle_cast(#privmsg{from = FromId, to = ToId, body = Text}, State = #state{remoteusers = RemoteUsers, localusers = Users}) ->
+	{FromId, _FromNick, Pid} = lists:keyfind(FromId, 1, RemoteUsers),
 	{ToId, ToNick} = lists:keyfind(ToId, 1, Users),
-	irc_client:send_privmsg(Client, ToNick, "<" ++ FromNick ++ "> " ++ Text),
+	irc_client:send_privmsg(Pid, ToNick, Text),
 	{noreply, State};
 
-handle_cast({add_user, Id, Nick}, State = #state{remoteusers = RemoteUsers}) ->
-	NewUsers = RemoteUsers ++ [{Id, Nick}],
+handle_cast({add_user, Id, Nick}, State = #state{remoteusers = RemoteUsers, host = Host, port = Port, channel = Channel, realname = RealName, username = UserName}) ->
+	{ok, Pid} = irc_client:start(Host, Port, Channel, Nick, RealName, UserName),
+	NewUsers = RemoteUsers ++ [{Id, Nick, Pid}],
 	{noreply, State#state{remoteusers = NewUsers}};
 
 handle_cast({remove_user, Id}, State = #state{remoteusers = RemoteUsers}) ->
+	{Id, _Nick, Pid} = lists:keyfind(Id, 1, RemoteUsers),
+	unlink(Pid),
+	exit(Pid, shutdown),
 	NewUsers = lists:keydelete(Id, 1, RemoteUsers),
 	{noreply, State#state{remoteusers = NewUsers}};
 
 handle_cast({rename_user, Id, Nick}, State = #state{remoteusers = RemoteUsers}) ->
+	{Id, _Nick, Pid} = lists:keyfind(Id, 1, RemoteUsers),
+	irc_client:change_nick(Pid, Nick),
 	NewUsers = lists:keyreplace(Id, 1, RemoteUsers, {Id, Nick}),
 	{noreply, State#state{remoteusers = NewUsers}};
 

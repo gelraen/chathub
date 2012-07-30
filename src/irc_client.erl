@@ -3,13 +3,14 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
--export([send_msg/2, send_privmsg/3]).
+-export([send_msg/2, send_privmsg/3, change_nick/2, start/6, start_master/6]).
 
 -record(state, {socket,
 				nick,
 				parent,
 				channel,
-				prefix_chars = "@+"}).
+				prefix_chars = "@+",
+				master = false}).
 
 -record(cmd, {name, prefix, args}).
 
@@ -18,6 +19,15 @@ send_msg(Pid, Text) ->
 
 send_privmsg(Pid, To, Text) ->
 	gen_server:cast(Pid, {send_privmsg, To, Text}).
+
+change_nick(Pid, NewNick) ->
+	gen_server:cast(Pid, {change_nick, NewNick}).
+
+start(Host, Port, Channel, Nick, RealName, UserName) ->
+	gen_server:start_link(?MODULE, {self(), Host, Port, Channel, Nick, RealName, UserName, false}, []).
+
+start_master(Host, Port, Channel, Nick, RealName, UserName) ->
+	gen_server:start_link(?MODULE, {self(), Host, Port, Channel, Nick, RealName, UserName, true}, []).
 
 first_token(Tok, []) ->
 	{Tok, []};
@@ -59,7 +69,7 @@ nick_from_prefix(Prefix) ->
 send(Socket, Line) ->
 	gen_tcp:send(Socket, Line ++ "\r\n").
 
-init({Parent, Host, Port, Channel, Nick, RealName, UserName}) ->
+init({Parent, Host, Port, Channel, Nick, RealName, UserName, Master}) ->
 	case gen_tcp:connect(Host, Port, [list, 
 			{active, true},
 			{packet, line},
@@ -67,10 +77,26 @@ init({Parent, Host, Port, Channel, Nick, RealName, UserName}) ->
 	{ok, Socket} ->
 		send(Socket, "NICK " ++ Nick),
 		send(Socket, "USER " ++ UserName ++ " 0 0 :" ++ RealName),
-		{ok, #state{socket=Socket, nick=Nick, channel=Channel, parent=Parent}};
+		{ok, #state{socket=Socket, nick=Nick, channel=Channel, parent=Parent, master = Master}};
 	{error, Reason} ->
 		{stop, Reason}
 	end.
+
+send_join(_, #state{master = false}) -> ok;
+send_join(Nick, #state{parent = Parent, master = true}) ->
+	irc:join(Parent, Nick, []).
+
+send_part(_, _, #state{master = false}) -> ok;
+send_part(Nick, Data, #state{parent = Parent, master = true}) ->
+	irc:part(Parent, Nick, Data).
+
+send_message(_ ,_ ,#state{master = false}) -> ok;
+send_message(Nick, Text, #state{parent = Parent, master = true}) ->
+	irc:message(Parent, Nick, Text).
+
+send_nick_change(_ ,_ ,#state{master = false}) -> ok;
+send_nick_change(Old, New, #state{parent = Parent, master = true}) ->
+	irc:nick_change(Parent, Old, New).
 
 handle_info({tcp, Socket, RawMessage}, State = #state{socket=Socket}) ->
 	Command = parse_message(RawMessage),
@@ -111,7 +137,7 @@ handle_info({tcp, Socket, RawMessage}, State = #state{socket=Socket}) ->
 			OurNick ->
 				ok;
 			Nick ->
-				irc:join(State#state.parent, Nick, [])
+				send_join(Nick, State)
 			end;
 		_ ->
 			ok
@@ -131,7 +157,7 @@ handle_info({tcp, Socket, RawMessage}, State = #state{socket=Socket}) ->
 					OurNick ->
 						ok;
 					_ ->
-						irc:join(State#state.parent, StrippedNick, [])
+						send_join(StrippedNick, State)
 					end
 				end,
 				string:tokens(lists:nth(4, Command#cmd.args), " "));
@@ -142,7 +168,7 @@ handle_info({tcp, Socket, RawMessage}, State = #state{socket=Socket}) ->
 	"PRIVMSG" ->
 		case hd(Command#cmd.args) of
 		Channel ->
-			irc:message(State#state.parent, nick_from_prefix(Command#cmd.prefix), lists:nth(2, Command#cmd.args));
+			send_message(nick_from_prefix(Command#cmd.prefix), lists:nth(2, Command#cmd.args), State);
 		OurNick ->
 			irc:private_message(State#state.parent,
 								nick_from_prefix(Command#cmd.prefix),
@@ -155,7 +181,7 @@ handle_info({tcp, Socket, RawMessage}, State = #state{socket=Socket}) ->
 	"NOTICE" ->
 		case hd(Command#cmd.args) of
 		Channel ->
-			irc:message(State#state.parent, nick_from_prefix(Command#cmd.prefix), lists:nth(2, Command#cmd.args));
+			send_message(nick_from_prefix(Command#cmd.prefix), lists:nth(2, Command#cmd.args), State);
 		OurNick ->
 			irc:private_message(State#state.parent,
 								nick_from_prefix(Command#cmd.prefix),
@@ -168,18 +194,23 @@ handle_info({tcp, Socket, RawMessage}, State = #state{socket=Socket}) ->
 	"NICK" ->
 		OldNick = nick_from_prefix(Command#cmd.prefix),
 		NewNick = hd(Command#cmd.args),
-		irc:nick_change(State#state.parent, OldNick, NewNick),
-		{noreply, State};
+		send_nick_change(OldNick, NewNick, State),
+		case OldNick of
+		OurNick ->
+			{noreply, State#state{nick = NewNick}};
+		_ ->
+			{noreply, State}
+		end;
 	"PART" ->
 		case hd(Command#cmd.args) of
 		Channel ->
-			irc:part(State#state.parent, nick_from_prefix(Command#cmd.prefix), tl(Command#cmd.args));
+			send_part(nick_from_prefix(Command#cmd.prefix), tl(Command#cmd.args), State);
 		_ ->
 			ok
 		end,
 		{noreply, State};
 	"QUIT" ->
-		irc:part(State#state.parent, nick_from_prefix(Command#cmd.prefix), tl(Command#cmd.args)),
+		send_part(nick_from_prefix(Command#cmd.prefix), tl(Command#cmd.args), State),
 		{noreply, State};
 	_ ->
 		{noreply, State}
@@ -198,6 +229,10 @@ handle_cast({send_msg, Text}, State = #state{socket = Socket, channel = Channel}
 
 handle_cast({send_privmsg, To, Text}, State = #state{socket = Socket}) ->
 	send(Socket, "PRIVMSG " ++ To ++ " :" ++ Text),
+	{noreply, State};
+
+handle_cast({change_nick, NewNick}, State = #state{socket = Socket}) ->
+	send(Socket, "NICK " ++ NewNick),
 	{noreply, State};
 
 handle_cast(_,State) -> {noreply, State}.
