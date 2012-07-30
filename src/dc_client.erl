@@ -145,7 +145,7 @@ handle_info({dc, Socket, RawMessage}, State = #state{socket=Socket, nick=Nick, p
 			send(Socket, <<"$Version 1,0091">>),
 			send(Socket, <<"$GetNickList">>),
 			send(Socket, "$MyINFO $ALL " ++ [Args] ++ " " ++ State#state.description ++ "$ $56Kbps" ++ [1] ++
-					"$no.email$" ++ integer_to_list(State#state.sharesize) ++ "$"),
+					"$$" ++ integer_to_list(State#state.sharesize) ++ "$"),
 			{noreply, State#state{nick = NewNick, loggedin = true}};
 		true ->
 			send_join(Args, State),
