@@ -54,6 +54,7 @@ user_renamed(Pid, Id, NewName) ->
 
 % gen_server callbacks
 init({{Host, Port, Channel, Opts}, Parent}) ->
+	process_flag(trap_exit, true),
 	State = lists:foldl(fun ({nick, NewNick}, State = #state{}) ->
 			State#state{nick = NewNick};
 		({realname, RealName}, State = #state{}) ->
@@ -171,6 +172,18 @@ handle_cast({rename_user, Id, Nick}, State = #state{remoteusers = RemoteUsers}) 
 
 handle_cast(_Request, State) ->
 	{noreply, State}.
+
+handle_info({'EXIT', Pid, Reason}, State = #state{remoteusers = Users, host = Host, port = Port, channel = Channel, realname = RealName, username = UserName}) ->
+	case lists:keyfind(Pid, 3, Users) of
+	{Id, Nick, Pid} ->
+		error_logger:error_msg("IRC client for \"~s\" died with reason \"~p\"~n", [Nick, Reason]),
+		{ok, NewPid} = irc_client:start(Host, Port, Channel, Nick, RealName, UserName),
+		NewUsers = lists:keyreplace(Pid, 3, Users, {Id, Nick, NewPid}),
+		{noreply, State#state{remoteusers = NewUsers}};
+	_ ->
+		error_logger:warning_msg("IRC handler received exit signal with reason \"~p\" from unknown process ~p~n", [Reason, Pid]),
+		{noreply, State}
+	end;
 
 handle_info(_Info, State) ->
 	{noreply, State}.
