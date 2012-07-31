@@ -69,6 +69,27 @@ nick_from_prefix(Prefix) ->
 send(Socket, Line) ->
 	gen_tcp:send(Socket, Line ++ "\r\n").
 
+replace_unsafe_chars([], Result) ->
+	lists:reverse(Result);
+replace_unsafe_chars([H | Tail], Result) when (H >= $A) andalso (H =< $Z);
+		(H >= $a) andalso (H =< $z);
+		(H >= $0) andalso (H =< $9);
+		H == $[;
+		H == $];
+		H == ${;
+		H == $};
+		H == $\\;
+		H == $`;
+		H == $_;
+		H == $^;
+		H == $| ->
+	replace_unsafe_chars(Tail, Result ++ [H]);
+replace_unsafe_chars([_ | Tail], Result) ->
+	replace_unsafe_chars(Tail, Result ++ "^").
+
+replace_unsafe_chars(Nick) ->
+	replace_unsafe_chars(Nick, "^").
+
 init({Parent, Host, Port, Channel, Nick, RealName, UserName, Master}) ->
 	case gen_tcp:connect(Host, Port, [list, 
 			{active, true},
@@ -122,6 +143,12 @@ handle_info({tcp, Socket, RawMessage}, State = #state{socket=Socket}) ->
 				State
 			end, State, tl(Command#cmd.args)),
 		{noreply, NewState};
+	"432" -> % Incorrect nickname
+		NewNick = replace_unsafe_chars(OurNick),
+		error_logger:info_msg("irc_client: replacing nick \"~s\" with \"~s\"~n", [OurNick, NewNick]),
+		send(Socket, "NICK " ++ NewNick),
+		irc:nick_change(State#state.parent, OurNick, NewNick),
+		{noreply, State#state{nick = NewNick}};
 	"433" -> % Nickname in use
 		NewNick = OurNick ++ "_",
 		send(Socket, "NICK " ++ NewNick),
