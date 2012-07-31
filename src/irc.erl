@@ -97,7 +97,7 @@ handle_cast({part, Nick, _Data}, State = #state{parent = Parent, localusers = Us
 		{noreply, State#state{localusers = NewUsers}}
 	end;
 
-handle_cast({nick_change, OldNick, NewNick}, State = #state{localusers = Users, parent = Parent}) ->
+handle_cast({nick_change, OldNick, NewNick}, State = #state{localusers = Users, parent = Parent, remoteusers = RemoteUsers}) ->
 	NewUsers = case lists:keyfind(OldNick, 2, Users) of
 	{Id, OldNick} ->
 		hub:rename_user(Parent, Id, NewNick),
@@ -105,7 +105,13 @@ handle_cast({nick_change, OldNick, NewNick}, State = #state{localusers = Users, 
 	false ->
 		Users
 	end,
-	{noreply, State#state{localusers = NewUsers}};
+	NewRemoteUsers = case lists:keyfind(OldNick, 2, RemoteUsers) of
+	{Id2, OldNick, Pid} ->
+		lists:keyreplace(Id2, 1, RemoteUsers, {Id2, NewNick, Pid});
+	false ->
+		RemoteUsers
+	end,
+	{noreply, State#state{localusers = NewUsers, remoteusers = NewRemoteUsers}};
 
 handle_cast({message, Nick, Text}, State = #state{localusers = Users}) ->
 	case lists:keyfind(Nick, 2, Users) of
