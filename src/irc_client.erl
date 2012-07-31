@@ -70,7 +70,7 @@ send(Socket, Line) ->
 	gen_tcp:send(Socket, Line ++ "\r\n").
 
 replace_unsafe_chars([], Result) ->
-	lists:reverse(Result);
+	Result;
 replace_unsafe_chars([H | Tail], Result) when (H >= $A) andalso (H =< $Z);
 		(H >= $a) andalso (H =< $z);
 		(H >= $0) andalso (H =< $9);
@@ -221,11 +221,12 @@ handle_info({tcp, Socket, RawMessage}, State = #state{socket=Socket}) ->
 	"NICK" ->
 		OldNick = nick_from_prefix(Command#cmd.prefix),
 		NewNick = hd(Command#cmd.args),
-		send_nick_change(OldNick, NewNick, State),
 		case OldNick of
 		OurNick ->
+			irc:nick_change(State#state.parent, OurNick, NewNick),
 			{noreply, State#state{nick = NewNick}};
 		_ ->
+			send_nick_change(OldNick, NewNick, State),
 			{noreply, State}
 		end;
 	"PART" ->
