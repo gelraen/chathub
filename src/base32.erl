@@ -45,6 +45,14 @@ decode_char(Char) ->
 
 decode([A,B,C,D,E,F,G,H|Rest], Result) ->
 	decode(Rest, Result ++ [decode_block([A,B,C,D,E,F,G,H])]);
+decode(Chars, Result) when length(Chars) == 7 ->
+	Result ++ [decode_block(Chars ++ "=")];
+decode(Chars, Result) when length(Chars) == 5 ->
+	Result ++ [decode_block(Chars ++ "===")];
+decode(Chars, Result) when length(Chars) == 4 ->
+	Result ++ [decode_block(Chars ++ "====")];
+decode(Chars, Result) when length(Chars) == 2 ->
+	Result ++ [decode_block(Chars ++ "======")];
 decode([], Result) ->
 	Result.
 
