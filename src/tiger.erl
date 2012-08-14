@@ -44,7 +44,6 @@ pad_block(Data, TotalLength) ->
 	[Block0, Block1].
 
 hash_block(<<Block:64/binary>>, {A, B, C}) ->
-	io:format("Hashing block: ~p~n", [Block]),
 	{A1, B1, C1} = pass(Block, 5, {A, B, C}),
 	X1 = key_schedule(Block),
 	{C2, A2, B2} = pass(X1, 7, {C1, A1, B1}),
