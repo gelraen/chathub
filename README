@@ -1,0 +1,22 @@
+chathub is multiprotocol chatroom hub. It should allow users from different
+groupchats, possibly with different protocols, to communicate with each other
+transparently.
+
+Sample configuration:
+{hub, hub1, [],
+        [{irc, {"localhost", 6667, "#chat", [
+                        {nick, "chathub"},
+                        {realname, "Multiprotocol chatroom hub"},
+                        {username, "chathub"}
+                ]
+                }},
+        {dc, {"localhost", 411, [
+                        {nick, "chathub"},
+                        {sharesize, 0},
+                        {description, "Multiprotocol chatroom hub"}
+                ]}}
+        ]
+}.
+
+This config defines one hub, which connects users from IRC channel #chat and
+NMDC hub.
